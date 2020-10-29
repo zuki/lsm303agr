@@ -16,9 +16,9 @@
 
 ## Examples
 
-You should find at least one example in the [f3] crate.
+You should find at least one example in the [f3_r6] crate.
 
-[f3]: https://docs.rs/f3/~0.5
+[f3_r6]: https://github.com/zuki/f3_r6
 
 ## License
 
