@@ -1,4 +1,4 @@
-//! A platform agnostic driver to interface with the LSM303DLHC (accelerometer + compass)
+//! A platform agnostic driver to interface with the LSM303AGR (accelerometer + compass)
 //!
 //! This driver was built using [`embedded-hal`] traits.
 //!
@@ -28,31 +28,33 @@ use hal::blocking::i2c::{Write, WriteRead};
 mod accel;
 mod mag;
 
-/// LSM303DLHC driver
-pub struct Lsm303dlhc<I2C> {
+/// LSM303AGR driver
+pub struct Lsm303agr<I2C> {
     i2c: I2C,
 }
 
-impl<I2C, E> Lsm303dlhc<I2C>
+impl<I2C, E> Lsm303agr<I2C>
 where
     I2C: WriteRead<Error = E> + Write<Error = E>,
 {
     /// Creates a new driver from a I2C peripheral
     pub fn new(i2c: I2C) -> Result<Self, E> {
-        let mut lsm303dlhc = Lsm303dlhc { i2c };
+        let mut lsm303agr = Lsm303agr { i2c };
 
         // TODO reset all the registers / the device
 
         // configure the accelerometer to operate at 400 Hz
-        lsm303dlhc.write_accel_register(accel::Register::CTRL_REG1_A, 0b0111_0_111)?;
+        lsm303agr.write_accel_register(accel::Register::CTRL_REG1_A, 0b0111_0_111)?;
 
         // configure the magnetometer to operate in continuous mode
-        lsm303dlhc.write_mag_register(mag::Register::MR_REG_M, 0b00)?;
+        // and enable temperature compensation
+        lsm303agr.write_mag_register(mag::Register::CFG_REG_A_M, 0x80)?;
 
-        // enable the temperature sensor
-        lsm303dlhc.write_mag_register(mag::Register::CRA_REG_M, 0b0001000 | (1 << 7))?;
+        // enable the temperature sensor: TEMP_EN = '11', BDU = '1' (4.5, page 34)
+        lsm303agr.write_accel_register(accel::Register::TEMP_CFG_REG_A, 0xC0)?;
+        lsm303agr.write_accel_register(accel::Register::CTRL_REG4_A, 0x80)?;
 
-        Ok(lsm303dlhc)
+        Ok(lsm303agr)
     }
 
     /// Accelerometer measurements
@@ -75,31 +77,39 @@ where
 
     /// Magnetometer measurements
     pub fn mag(&mut self) -> Result<I16x3, E> {
-        let buffer: GenericArray<u8, U6> = self.read_mag_registers(mag::Register::OUT_X_H_M)?;
+        let buffer: GenericArray<u8, U6> = self.read_mag_registers(mag::Register::OUTX_L_REG_M)?;
 
         Ok(I16x3 {
-            x: (u16(buffer[1]) + (u16(buffer[0]) << 8)) as i16,
-            y: (u16(buffer[5]) + (u16(buffer[4]) << 8)) as i16,
-            z: (u16(buffer[3]) + (u16(buffer[2]) << 8)) as i16,
+            x: (u16(buffer[0]) + (u16(buffer[1]) << 8)) as i16,
+            y: (u16(buffer[2]) + (u16(buffer[3]) << 8)) as i16,
+            z: (u16(buffer[4]) + (u16(buffer[5]) << 8)) as i16,
         })
     }
 
     /// Sets the magnetometer output data rate
     pub fn mag_odr(&mut self, odr: MagOdr) -> Result<(), E> {
-        self.modify_mag_register(mag::Register::CRA_REG_M, |r| {
-            r & !(0b111 << 2) | ((odr as u8) << 2)
+        self.modify_mag_register(mag::Register::CFG_REG_A_M, |r| {
+            r & !(0b11 << 2) | ((odr as u8) << 2)
         })
     }
 
     /// Temperature sensor measurement
     ///
-    /// - Resolution: 12-bit
+    /// - Resolution: 8-bit
     /// - Range: [-40, +85]
     pub fn temp(&mut self) -> Result<i16, E> {
-        let temp_out_l = self.read_mag_register(mag::Register::TEMP_OUT_L_M)?;
-        let temp_out_h = self.read_mag_register(mag::Register::TEMP_OUT_H_M)?;
+    
+        loop {
+            if let Ok(r) = self.read_accel_register(accel::Register::STATUS_REG_AUX_A) {
+                if (r & 0x04) == 0x04 {
+                    break;
+                }
+            }
+        }
+    
+        let buffer: GenericArray<u8, U2> = self.read_accel_registers(accel::Register::OUT_TEMP_L_A)?;
 
-        Ok(((u16(temp_out_l) + (u16(temp_out_h) << 8)) as i16) >> 4)
+        Ok((u16(buffer[0]) + (u16(buffer[1]) << 8)) as i16)
     }
 
     /// Changes the `sensitivity` of the accelerometer
@@ -131,7 +141,7 @@ where
     where
         N: ArrayLength<u8>,
     {
-        let mut buffer: GenericArray<u8, N> = unsafe { mem::uninitialized() };
+        let mut buffer: GenericArray<u8, N> = unsafe { mem::MaybeUninit::<GenericArray<u8, N>>::uninit().assume_init() };
 
         {
             let buffer: &mut [u8] = &mut buffer;
@@ -149,21 +159,19 @@ where
     }
 
     fn read_mag_register(&mut self, reg: mag::Register) -> Result<u8, E> {
-        let buffer: GenericArray<u8, U1> = self.read_mag_registers(reg)?;
-        Ok(buffer[0])
+        self.read_mag_registers::<U1>(reg).map(|b| b[0])
     }
 
-    // NOTE has weird address increment semantics; use only with `OUT_X_H_M`
     fn read_mag_registers<N>(&mut self, reg: mag::Register) -> Result<GenericArray<u8, N>, E>
     where
         N: ArrayLength<u8>,
     {
-        let mut buffer: GenericArray<u8, N> = unsafe { mem::uninitialized() };
+        let mut buffer: GenericArray<u8, N> = unsafe { mem::MaybeUninit::<GenericArray<u8, N>>::uninit().assume_init() };
 
         {
             let buffer: &mut [u8] = &mut buffer;
-
-            self.i2c.write_read(mag::ADDRESS, &[reg.addr()], buffer)?;
+            const MULTI: u8 = 1 << 7;
+            self.i2c.write_read(mag::ADDRESS, &[reg.addr() | MULTI], buffer)?;
         }
 
         Ok(buffer)
@@ -209,22 +217,14 @@ pub enum AccelOdr {
 
 /// Magnetometer Output Data Rate
 pub enum MagOdr {
-    /// 0.75 Hz
-    Hz0_75 = 0b000,
-    /// 1.5 Hz
-    Hz1_5 = 0b001,
-    /// 3 Hz
-    Hz3 = 0b010,
-    /// 7.5 Hz
-    Hz7_5 = 0b011,
-    /// 15 Hz
-    Hz15 = 0b100,
-    /// 30 Hz
-    Hz30 = 0b101,
-    /// 75 Hz
-    Hz75 = 0b110,
-    /// 220 Hz
-    Hz220 = 0b111,
+    /// 10 Hz
+    Hz10 = 0b00,
+    /// 20 Hz
+    Hz20 = 0b01,
+    /// 50 Hz
+    Hz50 = 0b10,
+    /// 100 Hz
+    Hz100 = 0b11,
 }
 
 /// Acceleration sensitivity

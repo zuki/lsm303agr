@@ -4,6 +4,12 @@ pub const ADDRESS: u8 = 0b0011001;
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone)]
 pub enum Register {
+    STATUS_REG_AUX_A = 0x07,
+    OUT_TEMP_L_A = 0x0C,
+    OUT_TEMP_H_A = 0x0D,
+    INT_COUNTER_REG_A = 0x0E,
+    WHO_AM_I_A = 0x0F,
+    TEMP_CFG_REG_A = 0x1F,
     CTRL_REG1_A = 0x20,
     CTRL_REG2_A = 0x21,
     CTRL_REG3_A = 0x22,
@@ -34,6 +40,8 @@ pub enum Register {
     TIME_LIMIT_A = 0x3B,
     TIME_LATENCY_A = 0x3C,
     TIME_WINDOW_A = 0x3D,
+    ACT_THS_A = 0x3E,
+    ACT_DUR_A = 0x3F,
 }
 
 impl Register {
