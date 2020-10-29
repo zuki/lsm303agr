@@ -1,6 +1,6 @@
-# `lsm303dlhc`
+# `lsm303agr`
 
-> A platform agnostic driver to interface with the LSM303DLHC (accelerometer + compass)
+> A platform agnostic driver to interface with the LSM303AGR (accelerometer + compass)
 
 ## What works
 
