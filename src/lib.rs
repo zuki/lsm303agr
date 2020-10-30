@@ -54,7 +54,8 @@ where
 
         // enable the temperature sensor: TEMP_EN = '11', BDU = '1' (4.5, page 34)
         lsm303agr.write_accel_register(accel::Register::TEMP_CFG_REG_A, 0xC0)?;
-        lsm303agr.write_accel_register(accel::Register::CTRL_REG4_A, 0x80)?;
+        // set high resolution mode
+        lsm303agr.write_accel_register(accel::Register::CTRL_REG4_A, 0x88)?;
 
         Ok(lsm303agr)
     }
