@@ -49,6 +49,8 @@ where
         // configure the magnetometer to operate in continuous mode
         // and enable temperature compensation
         lsm303agr.write_mag_register(mag::Register::CFG_REG_A_M, 0x80)?;
+        // enable offset cancellation
+        lsm303agr.write_mag_register(mag::Register::CFG_REG_B_M, 0x02)?;
 
         // enable the temperature sensor: TEMP_EN = '11', BDU = '1' (4.5, page 34)
         lsm303agr.write_accel_register(accel::Register::TEMP_CFG_REG_A, 0xC0)?;
